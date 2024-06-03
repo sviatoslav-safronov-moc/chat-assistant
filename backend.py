@@ -3,7 +3,7 @@ import requests
 import os
 from time import sleep
 
-app = Flask(__name__, static_folder=None)
+app = Flask(__name__, static_folder='build', static_url_path='/')
 
 @app.after_request
 def add_custom_header(response):
@@ -44,20 +44,20 @@ def bot_response():
 
   return jsonify({'message': bot_message,'thread': thread_id})
 
-@app.route('/', defaults={'path': ''})
-@app.route('/<path:path>')
-def forward_request(path):
-  print(path)
-  response = requests.request(
-    method='GET',
-    url=f"http://localhost:3000/{path}",
-    headers=request.headers,
-    allow_redirects=False
-  )
-  excluded_headers = {'transfer-encoding', 'content-encoding'}
-  forwarded_headers = {k: v for k, v in response.headers.items() if k.lower() not in excluded_headers}
+# @app.route('/', defaults={'path': ''})
+# @app.route('/<path:path>')
+# def forward_request(path):
+#   print(path)
+#   response = requests.request(
+#     method='GET',
+#     url=f"http://localhost:3000/{path}",
+#     headers=request.headers,
+#     allow_redirects=False
+#   )
+#   excluded_headers = {'transfer-encoding', 'content-encoding'}
+#   forwarded_headers = {k: v for k, v in response.headers.items() if k.lower() not in excluded_headers}
 
-  return response.content, response.status_code, forwarded_headers
+#   return response.content, response.status_code, forwarded_headers
 
 if __name__ == '__main__':
-  app.run(debug=True, port=8080)
+  app.run(debug=True, host='0.0.0.0')

@@ -1,0 +1,7 @@
+services:
+  python:
+    build: .
+    ports:
+      - 5000:5000
+    command: python backend.py
+    env_file: .env

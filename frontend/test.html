@@ -1,0 +1,62 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Audio Recording</title>
+</head>
+<body>
+    <h1>Audio Recording (WebM)</h1>
+    <button id="start">Start Recording</button>
+    <button id="stop" disabled>Stop Recording</button>
+    <a id="downloadLink" download="audio_recording.webm" style="display: none;">Download Recording</a>
+
+    <script>
+        const startButton = document.getElementById('start');
+        const stopButton = document.getElementById('stop');
+        const downloadLink = document.getElementById('downloadLink');
+        let mediaRecorder;
+        let recordedChunks = [];
+
+        async function startRecording() {
+            // Request access to only the audio input (microphone)
+            const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+
+            // Set up MediaRecorder to record audio only
+            mediaRecorder = new MediaRecorder(stream, { mimeType: 'audio/webm' });
+
+            mediaRecorder.ondataavailable = function (event) {
+                if (event.data.size > 0) {
+                    recordedChunks.push(event.data);
+                }
+            };
+
+            mediaRecorder.onstop = function () {
+                // Create a Blob from the recorded audio chunks
+                const blob = new Blob(recordedChunks, { type: 'audio/webm' });
+                const url = URL.createObjectURL(blob);
+                downloadLink.href = url;
+                downloadLink.style.display = 'block';
+                downloadLink.click();
+
+                // Reset the recorded chunks for future recordings
+                recordedChunks = [];
+            };
+
+            // Start recording
+            mediaRecorder.start();
+            startButton.disabled = true;
+            stopButton.disabled = false;
+        }
+
+        function stopRecording() {
+            mediaRecorder.stop();
+            startButton.disabled = false;
+            stopButton.disabled = true;
+        }
+
+        startButton.addEventListener('click', startRecording);
+        stopButton.addEventListener('click', stopRecording);
+    </script>
+</body>
+</html>

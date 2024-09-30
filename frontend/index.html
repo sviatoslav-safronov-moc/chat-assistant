@@ -8,52 +8,151 @@
 <body>
   <h1>Voice Bot</h1>
   <button id="start-btn">Start Listening</button>
+  <p id="transcript"></p>
   <p id="bot-message"></p>
 
   <script>
-    const startBtn = document.getElementById('start-btn');
-    const botMessage = document.getElementById('bot-message');
-    startBtn.addEventListener('click', () => {
-      navigator.mediaDevices.getUserMedia({ audio: true })
-      .then(stream => {
-        const mediaRecorder = new MediaRecorder(stream);
-        const audioChunks = [];
-
-        mediaRecorder.ondataavailable = event => {
-        audioChunks.push(event.data);
-        };
-
-        mediaRecorder.onstop = async () => {
-          const audioBlob = new Blob(audioChunks, { type: 'audio/wav' });
-          const formData = new FormData();
-          formData.append('audio', audioBlob, 'audio.wav');
-
-          try {
-            const response = await fetch('/bot', {
-              method: 'POST',
-              body: formData
-            });
-
-            if (response.ok) {
-              const data = await response.json();
-              botMessage.textContent = data.message;
-            } else {
-              botMessage.textContent = 'Error: Unable to get response from bot.';
-            }
-          } catch (error) {
-            botMessage.textContent = 'Error: ' + error.message;
+    const encodeWAV = (samples, sampleRate) => {
+      const downsampleBuffer = (buffer, sampleRate, outSampleRate) => {
+        if (outSampleRate === sampleRate) {
+          return buffer;
+        }
+        const sampleRateRatio = sampleRate / outSampleRate;
+        const newLength = Math.round(buffer.length / sampleRateRatio);
+        const result = new Float32Array(newLength);
+        let offsetResult = 0;
+        let offsetBuffer = 0;
+        while (offsetResult < result.length) {
+          const nextOffsetBuffer = Math.round((offsetResult + 1) * sampleRateRatio);
+          let accum = 0, count = 0;
+          for (let i = offsetBuffer; i < nextOffsetBuffer && i < buffer.length; i++) {
+            accum += buffer[i];
+            count++;
           }
-        };
+          result[offsetResult] = accum / count;
+          offsetResult++;
+          offsetBuffer = nextOffsetBuffer;
+        }
+        return result;
+      };
 
-        mediaRecorder.start();
+      const downsampledSamples = downsampleBuffer(samples, sampleRate, 16000);
 
-        setTimeout(() => {
+      const buffer = new ArrayBuffer(44 + downsampledSamples.length * 2);
+      const view = new DataView(buffer);
+
+      const writeString = (view, offset, string) => {
+        for (let i = 0; i < string.length; i++) {
+          view.setUint8(offset + i, string.charCodeAt(i));
+        }
+      };
+
+      const floatTo16BitPCM = (output, offset, input) => {
+        for (let i = 0; i < input.length; i++, offset += 2) {
+          const s = Math.max(-1, Math.min(1, input[i]));
+          output.setInt16(offset, s < 0 ? s * 0x8000 : s * 0x7FFF, true);
+        }
+      };
+
+      writeString(view, 0, 'RIFF');
+      view.setUint32(4, 36 + downsampledSamples.length * 2, true);
+      writeString(view, 8, 'WAVE');
+      writeString(view, 12, 'fmt ');
+      view.setUint32(16, 16, true);
+      view.setUint16(20, 1, true);
+      view.setUint16(22, 1, true);
+      view.setUint32(24, 16000, true);
+      view.setUint32(28, 16000 * 2, true);
+      view.setUint16(32, 2, true);
+      view.setUint16(34, 16, true);
+      writeString(view, 36, 'data');
+      view.setUint32(40, downsampledSamples.length * 2, true);
+
+      floatTo16BitPCM(view, 44, downsampledSamples);
+      return new Blob([view], {type: 'audio/wav'});
+    }
+
+    const startBtn = document.getElementById('start-btn');
+    let listening, interval = false;
+    const botMessage = document.getElementById('bot-message');
+    const transcript = document.getElementById('transcript');
+    startBtn.addEventListener('click', () => {
+      if (!interval) {
+        interval = setInterval(() => {
+          fetch('/answer')
+            .then(response => response.text())
+            .then(data => {
+              if (data) {
+                clearInterval(interval);
+                interval = false;
+                botMessage.textContent = data;
+              }
+            })
+            .catch(error => {
+              clearInterval(interval);
+              interval = false;
+              botMessage.textContent = 'Error: ' + data
+            })
+        }, 1000);
+      }
+
+      if (listening) {
+        listening = false;
         mediaRecorder.stop();
-        }, 5000); // Record for 5 seconds
-      })
-      .catch(error => {
-        botMessage.textContent = 'Error: ' + error.message;
-      });
+        startBtn.textContent = 'Start Listening';
+      } else {
+        navigator.mediaDevices.getUserMedia({ audio: true })
+        .then(stream => {
+          // const audioContext = new AudioContext();
+          let chunks = [];
+          mediaRecorder = new MediaRecorder(stream);
+          mediaRecorder.addEventListener('dataavailable', async event => {
+            console.log(event)
+            if (event.data.size > 0) {
+              // const arrayBuffer = await event.data.arrayBuffer();
+              // const audioBuffer = await audioContext.decodeAudioData(arrayBuffer);
+
+              // const sampleRate = audioBuffer.sampleRate;
+              // const samples = audioBuffer.getChannelData(0);
+
+              // const wavBlob = encodeWAV(samples, sampleRate);
+
+              // const formData = new FormData();
+              // formData.append('audio', event.data, 'chunks.webm');
+              // const data = await fetch('/chunks', { method: 'POST', body: formData });
+              // transcript.textContent = data.message;
+              chunks.push(event.data);
+              mediaRecorder.stop();
+            }
+          });
+          mediaRecorder.addEventListener('stop', async () => {
+            const formData = new FormData();
+            const audio = new Blob(chunks, { type: chunks[0].type });
+            const arrayBuffer = await audio.arrayBuffer();
+            const audioContext = new AudioContext();
+            const audioBuffer = await audioContext.decodeAudioData(arrayBuffer);
+            const sampleRate = audioBuffer.sampleRate;
+            const samples = audioBuffer.getChannelData(0);
+            const wavBlob = encodeWAV(samples, sampleRate);
+            formData.append('audio', wavBlob, 'chunks.wav');
+            const data = await fetch('/chunks', { method: 'POST', body: formData  }).then(response => response.text());
+            transcript.textContent = data;
+            if (listening) {
+              chunks = []
+              mediaRecorder.start(1000);
+            } else {
+              await fetch('/end');
+              stream.getTracks().forEach(track => track.stop());
+            }
+          });
+          listening = true;
+          mediaRecorder.start(1000);
+          startBtn.textContent = 'Stop Listening';
+        })
+        .catch(error => {
+          botMessage.textContent = 'Error: ' + error.message;
+        });
+      }
     });
   </script>
 </body>
